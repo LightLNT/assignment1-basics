@@ -28,8 +28,8 @@ def run_linear(
     Returns:
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
-
-    raise NotImplementedError
+    return in_features @ weights.T
+    # raise NotImplementedError
 
 
 def run_embedding(
