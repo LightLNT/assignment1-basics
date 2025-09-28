@@ -50,8 +50,8 @@ def run_embedding(
     Returns:
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
-
-    raise NotImplementedError
+    return weights[token_ids]
+    # raise NotImplementedError
 
 
 def run_swiglu(
@@ -76,6 +76,14 @@ def run_swiglu(
     Returns:
         Float[Tensor, "... d_model"]: Output embeddings of the same shape as the input embeddings.
     """
+    def silu(x):
+        return x * (1 / (1 + torch.exp(-x)))
+    
+    x1 = silu(in_features @ w1_weight.T) #(... d_ff)
+    x2 = in_features @ w3_weight.T #(... d_ff)
+    x3 = x1 * x2 #(... d_ff)
+    res = (x3 @ w2_weight.T) #(... d_ff) @ (d_ff d_model)   = (... d_model)
+    return res
     # Example:
     # If your state dict keys match, you can use `load_state_dict()`
     # swiglu.load_state_dict(weights)
@@ -104,7 +112,12 @@ def run_scaled_dot_product_attention(
     Returns:
         Float[Tensor, " ... queries d_v"]: Output of SDPA
     """
-    raise NotImplementedError
+    d_k = torch.tensor(Q.shape[-1],dtype=Q.dtype)
+    attention_score = Q @ K.transpose(-1,-2) / torch.sqrt(d_k)# [... queries keys]
+    if mask is not None:
+        attention_score = attention_score.masked_fill(~mask,float("-inf"))
+    return torch.softmax(attention_score,dim = -1) @ V
+    # raise NotImplementedError
 
 
 def run_multihead_self_attention(
@@ -138,7 +151,20 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    raise NotImplementedError
+    batch,seq_len,_ = in_features.shape
+    proj_dk = q_proj_weight.shape[-2]
+    proj_dv = v_proj_weight.shape[-2]
+    Q = in_features @ q_proj_weight.T # (... seq_len d_k)
+    K = in_features @ k_proj_weight.T # (... seq_len d_k)
+    V = in_features @ v_proj_weight.T # (... seq_len d_v)
+    head_dim_k = proj_dk // num_heads
+    head_dim_v = proj_dv // num_heads
+    # reshape后batch seq_len num_head head_dim
+    Q = Q.reshape(batch,seq_len,num_heads,head_dim_k).permute(0,2,1,3) # batch num_head seq_len head_dim
+    K = K.reshape(batch,seq_len,num_heads,head_dim_k).permute(0,2,1,3) # batch num_head seq_len head_dim
+    V = V.reshape(batch,seq_len,num_heads,head_dim_v).permute(0,2,1,3) # batch num_head seq_len head_dim
+    attention_result = run_scaled_dot_product_attention(Q,K,V,None) # batch num_head seq_len d_model
+    return attention_result.permute(0,2,1,3).reshape(batch,seq_len,d_model) @ o_proj_weight.T
 
 
 def run_multihead_self_attention_with_rope(
