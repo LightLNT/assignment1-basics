@@ -131,13 +131,13 @@ def run_scaled_dot_product_attention(
         attention_score = attention_score.masked_fill(~mask,float("-inf"))
     return torch.softmax(attention_score,dim = -1) @ V
     # raise NotImplementedError
-    """
-    d_k = torch.tensor(Q.shape[-1],dtype=Q.dtype)
-    attention_score = Q @ K.transpose(-1,-2) / torch.sqrt(d_k)# [... queries keys]
-    if mask is not None:
-        attention_score = attention_score.masked_fill(~mask,float("-inf"))
-    return torch.softmax(attention_score,dim = -1) @ V
-    # raise NotImplementedError
+   
+    # d_k = torch.tensor(Q.shape[-1],dtype=Q.dtype)
+    # attention_score = Q @ K.transpose(-1,-2) / torch.sqrt(d_k)# [... queries keys]
+    # if mask is not None:
+    #     attention_score = attention_score.masked_fill(~mask,float("-inf"))
+    # return torch.softmax(attention_score,dim = -1) @ V
+    # # raise NotImplementedError
 
 
 def run_multihead_self_attention(
