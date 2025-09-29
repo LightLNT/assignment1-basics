@@ -208,15 +208,56 @@ def run_multihead_self_attention_with_rope(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    head_dim = d_model // num_heads
+    
+
+    def multihead_rope(
+        multihead_query_or_key: Float[Tensor, "... seq_len head_dim"],
+        token_positions: Int[Tensor, "... seq_len"]
+    ):
+        head_dim = multihead_query_or_key.shape[-1]
+        num_heads_inner = multihead_query_or_key.shape[-3]  # 从张量获取 num_heads
+        half_dim = head_dim // 2
+        dim_range = torch.arange(half_dim, device=multihead_query_or_key.device)
+        frq = 1.0 / (theta ** (2 * dim_range / head_dim))
+
+        pos = token_positions.unsqueeze(-3).unsqueeze(-1)  # [batch, 1, seq_len, 1]
+        pos = pos.expand(-1, num_heads_inner, -1, -1)      # [batch, num_heads, seq_len, 1]
+        angles = pos * frq  # [batch, num_heads, seq_len, half_dim]
+        
+        x_even = multihead_query_or_key[..., 0::2]
+        x_odd = multihead_query_or_key[..., 1::2]
+
+        x_rotated_even = x_even * torch.cos(angles) - x_odd * torch.sin(angles)
+        x_rotated_odd = x_even * torch.sin(angles) + x_odd * torch.cos(angles)
+
+        out = torch.stack([x_rotated_even, x_rotated_odd], dim=-1)
+        out = out.flatten(-2)
+        return out
+    
     batch, seq_len, _ = in_features.shape
-    Q = in_features @ q_proj_weight.T # [... seq_len d_k]
-    K = in_features @ k_proj_weight.T # [... seq_len d_k]
-    V = in_features @ v_proj_weight.T # [... seq_len d_v]
-    Q = Q.reshape(batch,seq_len,num_heads,head_dim).permute(0,2,1,3)
-    K = K.reshape(batch,seq_len,num_heads,head_dim).permute(0,2,1,3)
-    V = V.reshape(batch,seq_len,num_heads,head_dim).permute(0,2,1,3)
-    raise NotImplementedError
+    d_k_h = q_proj_weight.shape[0] // num_heads
+    d_v_h = v_proj_weight.shape[0] // num_heads
+    
+    # 处理 token_positions 为 None 的情况
+    if token_positions is None:
+        token_positions = torch.arange(seq_len, device=in_features.device).expand(batch, -1)
+
+    Q = in_features @ q_proj_weight.T  # [batch, seq_len, d_k]
+    K = in_features @ k_proj_weight.T  # [batch, seq_len, d_k]
+    V = in_features @ v_proj_weight.T  # [batch, seq_len, d_v]
+    
+    Q = Q.reshape(batch, seq_len, num_heads, d_k_h).permute(0, 2, 1, 3)
+    K = K.reshape(batch, seq_len, num_heads, d_k_h).permute(0, 2, 1, 3)
+    V = V.reshape(batch, seq_len, num_heads, d_v_h).permute(0, 2, 1, 3)
+    
+    Q_rope = multihead_rope(Q, token_positions)
+    K_rope = multihead_rope(K, token_positions)
+    
+    out = run_scaled_dot_product_attention(Q_rope, K_rope, V, None)
+    out = out.permute(0, 2, 1, 3).reshape(batch, seq_len, num_heads * d_v_h)  # 注意这里是 d_v_h
+    out = out @ o_proj_weight.T
+    return out
+
 
 
 def run_rope(
@@ -238,6 +279,23 @@ def run_rope(
     Returns:
         Float[Tensor, " ... sequence_length d_k"]: Tensor with RoPEd input.
     """
+    half_dim = d_k // 2
+    dim_range = torch.arange(half_dim, device = in_query_or_key.device)
+    freq = 1.0 / (theta ** (2 * dim_range / d_k)) #[half_dim]
+
+    pos = token_positions.unsqueeze(-1) # [batch seq_len 1]
+    angles = freq * pos # [batch seq_len half_dim]
+
+    x_even = in_query_or_key[...,0::2]
+    x_odd = in_query_or_key[...,1::2]
+
+    x_rotated_even = x_even * torch.cos(angles) - x_odd * torch.sin(angles)
+    x_rotated_odd = x_even * torch.sin(angles) + x_odd * torch.cos(angles)
+
+    out = torch.stack([x_rotated_even,x_rotated_odd],dim = -1) # batch seq_len half_dim 2
+    out = out.flatten(-2) # batch seq_len d_k
+    return out
+
     raise NotImplementedError
 
 
@@ -430,6 +488,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
+    return in_features @ torch.sigmoid(in_features)
     raise NotImplementedError
 
 
