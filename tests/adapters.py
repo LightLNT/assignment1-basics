@@ -7,6 +7,7 @@ from typing import IO, Any, BinaryIO
 import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
+from einops import rearrange
 from torch import Tensor
 
 
@@ -244,7 +245,7 @@ def run_multihead_self_attention_with_rope(
     
 
     def multihead_rope(
-        multihead_query_or_key: Float[Tensor, "... seq_len head_dim"],
+        multihead_query_or_key: Float[Tensor, "... seq_len head_dim"], # batch num_head seq_len head_dim
         token_positions: Int[Tensor, "... seq_len"]
     ):
         head_dim = multihead_query_or_key.shape[-1]
@@ -258,16 +259,17 @@ def run_multihead_self_attention_with_rope(
         angles = pos * frq  # [batch, num_heads, seq_len, half_dim]
         
         x_even = multihead_query_or_key[..., 0::2]
-        x_odd = multihead_query_or_key[..., 1::2]
+        x_odd = multihead_query_or_key[..., 1::2] # [batch num_heads seq_len half_dim]
 
         x_rotated_even = x_even * torch.cos(angles) - x_odd * torch.sin(angles)
         x_rotated_odd = x_even * torch.sin(angles) + x_odd * torch.cos(angles)
 
-        out = torch.stack([x_rotated_even, x_rotated_odd], dim=-1)
-        out = out.flatten(-2)
+        out = torch.stack([x_rotated_even, x_rotated_odd], dim=-1) #[batch num_heads seq_lenn half_dim 2]
+        # out = out.flatten(-2)
+        rearrange(out,"... half_dim 2 -> ... (half_dim 2)")
         return out
     
-    batch, seq_len, _ = in_features.shape
+    batch, seq_len, _ = in_features.shape # batch seq_len d_in
     d_k_h = q_proj_weight.shape[0] // num_heads
     d_v_h = v_proj_weight.shape[0] // num_heads
     
@@ -507,7 +509,11 @@ def run_rmsnorm(
         Float[Tensor,"... d_model"]: Tensor of with the same shape as `in_features` with the output of running
         RMSNorm of the `in_features`.
     """
-    raise NotImplementedError
+    # rms
+    rms_x = torch.sqrt(torch.sum(in_features ** 2,dim=-1,keepdim=True) / d_model + eps)
+    normed = in_features / rms_x
+    return normed * weights
+    # raise NotImplementedError
 
 
 def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
@@ -521,7 +527,7 @@ def run_silu(in_features: Float[Tensor, " ..."]) -> Float[Tensor, " ..."]:
         Float[Tensor,"..."]: of with the same shape as `in_features` with the output of applying
         SiLU to each element.
     """
-    return in_features @ torch.sigmoid(in_features)
+    return in_features * torch.sigmoid(in_features)
     raise NotImplementedError
 
 
@@ -561,6 +567,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
+    return torch.exp(in_features) / torch.sum(torch.exp(in_features),dim = -1)
     raise NotImplementedError
 
 
@@ -579,6 +586,7 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
+    
     raise NotImplementedError
 
 
