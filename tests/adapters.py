@@ -567,7 +567,7 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
         Float[Tensor, "..."]: Tensor of with the same shape as `in_features` with the output of
         softmax normalizing the specified `dim`.
     """
-    return torch.exp(in_features) / torch.sum(torch.exp(in_features),dim = -1)
+    return torch.exp(in_features) / torch.sum(torch.exp(in_features),dim = dim)
     raise NotImplementedError
 
 
@@ -586,7 +586,10 @@ def run_cross_entropy(
     Returns:
         Float[Tensor, ""]: The average cross-entropy loss across examples.
     """
-    
+    inputs_normed_log = torch.log(run_softmax(inputs,dim = -1))
+    # 每一行 为一个样本的feature
+    correct_probs = inputs_normed_log.gather(dim = -1,index = targets.unsqueeze(1)).squeeze() #指定dim为应用index的维度，指定列则行自动递增 [batch]
+    return - correct_probs.mean()
     raise NotImplementedError
 
 
