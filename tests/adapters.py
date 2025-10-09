@@ -5,6 +5,7 @@ from collections.abc import Iterable
 from typing import IO, Any, BinaryIO
 
 import numpy.typing as npt
+import numpy as np
 import torch
 from jaxtyping import Bool, Float, Int
 from einops import rearrange
@@ -551,6 +552,20 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
+    # 随机构造batch个起始点
+    start = np.random.randint(
+        low = 0,
+        high = dataset.shape[0] - context_length - 1,
+        size = batch_size
+    )
+    # 用batch个起始点生成对应的inputs和targets
+    inputs = [dataset[s:s+context_length] for s in start]
+    targets = [dataset[s + 1 : s + 1 + context_length] for s in start]
+    # 转换成tensor和目标设备
+    inputs = torch.tensor(inputs,dtype=torch.LongTensor).to(device)
+    targets = torch.tensor(targets,dtype=torch.LongTensor).to(device)
+    return (inputs,targets) # tuple
+
     raise NotImplementedError
 
 
@@ -602,6 +617,14 @@ def run_gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm:
 
     The gradients of the parameters (parameter.grad) should be modified in-place.
     """
+    eps = 1e-6
+    grads = [p.grad for p in parameters]
+    l2_norm = torch.sqrt(torch.sum(grads ** 2)) # L2范数 L2_norm = sqrt(sum(g**2))
+    if l2_norm > max_l2_norm:
+        scale_factor = max_l2_norm / (l2_norm + eps)
+        for g in grads:
+            g.mul_(scale_factor)
+    
     raise NotImplementedError
 
 
@@ -609,6 +632,7 @@ def get_adamw_cls() -> Any:
     """
     Returns a torch.optim.Optimizer that implements AdamW.
     """
+    return torch.optim.AdamW
     raise NotImplementedError
 
 
